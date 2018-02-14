@@ -100,7 +100,7 @@ function applyRuleset (url, applicableRule) {
     if (newUrl !== url) {
       return {
         redirectURL: newUrl,
-        ruleset: ruleset.f
+        ruleset: ruleset.name
       }
     }
   }
