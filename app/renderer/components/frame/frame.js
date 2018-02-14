@@ -5,6 +5,7 @@
 const React = require('react')
 const Immutable = require('immutable')
 const ipc = require('electron').ipcRenderer
+const remote = require('electron').remote
 
 // Actions
 const appActions = require('../../../../js/actions/appActions')
@@ -206,36 +207,36 @@ class Frame extends React.Component {
   }
 
   zoomIn () {
-    if (this.webview) {
-      this.webview.zoomIn()
-      windowActions.setLastZoomPercentage(this.frame, this.webview.getZoomPercent())
+    if (this.webContents) {
+      this.webContents.zoomIn()
+      windowActions.setLastZoomPercentage(this.frame, this.webContents.getZoomPercent())
     }
   }
 
   zoomOut () {
-    if (this.webview) {
-      this.webview.zoomOut()
-      windowActions.setLastZoomPercentage(this.frame, this.webview.getZoomPercent())
+    if (this.webContents) {
+      this.webContents.zoomOut()
+      windowActions.setLastZoomPercentage(this.frame, this.webContents.getZoomPercent())
     }
   }
 
   zoomReset () {
-    if (this.webview) {
-      this.webview.zoomReset()
-      windowActions.setLastZoomPercentage(this.frame, this.webview.getZoomPercent())
+    if (this.webContents) {
+      this.webContents.zoomReset()
+      windowActions.setLastZoomPercentage(this.frame, this.webContents.getZoomPercent())
     }
   }
 
   enterHtmlFullScreen () {
-    if (this.webview) {
-      this.webview.executeScriptInTab(config.braveExtensionId, 'document.documentElement.webkitRequestFullScreen()', {})
-      this.webview.focus()
+    if (this.webContents) {
+      this.webContents.executeScriptInTab(config.braveExtensionId, 'document.documentElement.webkitRequestFullScreen()', {})
+      this.webContents.focus()
     }
   }
 
   exitHtmlFullScreen () {
-    if (this.webview) {
-      this.webview.executeScriptInTab(config.braveExtensionId, 'document.webkitExitFullscreen()', {})
+    if (this.webContents) {
+      this.webContents.executeScriptInTab(config.braveExtensionId, 'document.webkitExitFullscreen()', {})
     }
   }
 
@@ -255,7 +256,7 @@ class Frame extends React.Component {
     const cb = (prevProps = {}) => {
       this.onPropsChanged(prevProps)
       if (this.props.isActive && !prevProps.isActive && !this.props.urlBarFocused) {
-        this.webview.focus()
+        this.webContents.focus()
       }
 
       // make sure the webview content updates to
@@ -281,7 +282,7 @@ class Frame extends React.Component {
   handleShortcut () {
     switch (this.props.activeShortcut) {
       case 'stop':
-        this.webview.stop()
+        this.webContents.stop()
         break
       case 'reload':
         // Ensure that the webview thinks we're on the same location as the browser does.
@@ -328,23 +329,23 @@ class Frame extends React.Component {
           ? UrlUtil.getLocationIfPDF(this.props.tabUrl)
           : this.props.tabUrl
         // TODO: Sometimes this tries to save in a non-existent directory
-        this.webview.downloadURL(downloadLocation, true)
+        this.webContents.downloadURL(downloadLocation, true)
         break
       case 'print':
-        this.webview.print()
+        this.webContents.print()
         break
       case 'show-findbar':
         windowActions.setFindbarShown(this.props.frameKey, true)
         break
       case 'focus-webview':
-        setImmediate(() => this.webview.focus())
+        setImmediate(() => this.webContents.focus())
         break
       case 'copy':
         let selection = window.getSelection()
         if (selection && selection.toString()) {
           appActions.clipboardTextCopied(selection.toString())
         } else {
-          this.webview.copy()
+          this.webContents.copy()
         }
         break
       case 'find-next':
@@ -432,13 +433,48 @@ class Frame extends React.Component {
     })
   }
 
+  eventListener (event) {
+    if (event.type === 'destroyed') {
+      this.unregisterEventListener(this.props.tabId)
+    }
+
+    if (this.webview) {
+      this.webview.dispatchEvent(event)
+    }
+  }
+
+  registerEventListener (tabId) {
+    this.webContents = null
+    remote.getWebContents(tabId, (webContents) => {
+      this.webContents = webContents
+    })
+    remote.registerEvents(tabId, this.eventListener)
+  }
+
+  unregisterEventListener (tabId) {
+    if (tabId == null)
+      return
+
+    remote.unregisterEvents(tabId, this.eventListener)
+  }
+
   addEventListeners () {
+    this.eventListener = this.eventListener.bind(this)
+
+    if (this.props.tabId) {
+      this.registerEventListener(this.props.tabId)
+    }
+
     this.webview.addEventListener('tab-id-changed', (e) => {
       if (this.frame.isEmpty()) {
         return
       }
 
-      windowActions.frameTabIdChanged(this.frame, this.props.tabId, e.tabID)
+      if (this.props.tabId !== e.tabID) {
+        this.unregisterEventListener(this.props.tabId)
+        this.registerEventListener(e.tabID)
+        windowActions.frameTabIdChanged(this.frame, this.props.tabId, e.tabID)
+      }
     }, { passive: true })
     this.webview.addEventListener('guest-ready', (e) => {
       if (this.frame.isEmpty()) {
@@ -548,7 +584,7 @@ class Frame extends React.Component {
           }
           break
         case messages.STOP_LOAD:
-          method = () => this.webview.stop()
+          method = () => this.webContents.stop()
           break
         case messages.GO_BACK:
           method = () => appActions.onGoBack(this.props.tabId)
@@ -729,7 +765,7 @@ class Frame extends React.Component {
       // Only take focus away from the urlBar if:
       // The tab is active, it's not the new tab page, and the webview isn't already active.
       if (this.props.isActive && !isNewTabPage && document.activeElement !== this.webview) {
-        this.webview.focus()
+        this.webContents.focus()
       }
       if (!this.frame.isEmpty()) {
         windowActions.setNavigated(e.url, this.props.frameKey, false, this.props.tabId)
@@ -826,7 +862,7 @@ class Frame extends React.Component {
     }
     const searchString = this.props.findDetailSearchString
     if (searchString) {
-      webviewActions.findInPage(searchString, this.props.findDetailCaseSensitivity, forward, this.props.findDetailInternalFindStatePresent, this.webview)
+      webviewActions.findInPage(searchString, this.props.findDetailCaseSensitivity, forward, this.props.findDetailInternalFindStatePresent, this.webContents)
     }
   }
 
