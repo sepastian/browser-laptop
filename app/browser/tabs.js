@@ -1052,18 +1052,20 @@ const api = {
         // If the current tab is pinned, then don't allow to drag out
         return
       }
-
-      // detach from current window
-      tab.detach(() => {
+      const tabWasActive = tabValue.get('active')
+      const detachedTabId = tabId
+      const attachToNewWindow = (tabToAttach) => {
+        const attachedTabId = tabToAttach.getId()
         // handle tab has detached from window
         // handle tab was the active tab of the window
-        if (tabValue.get('active')) {
+        if (tabWasActive) {
           // decide and set next-active-tab muon override
-          const nextActiveTabIdForOldWindow = api.getNextActiveTabId(currentWindowId, tabId)
+          const nextActiveTabIdForOldWindow = api.getNextActiveTabId(currentWindowId, detachedTabId)
           if (nextActiveTabIdForOldWindow !== null) {
             api.setActive(nextActiveTabIdForOldWindow)
           }
         }
+        frameOpts = frameOpts.set('tabId', attachedTabId)
         if (toWindowId == null || toWindowId === -1) {
           if (shouldDebugTabEvents) {
             console.log('creating new window for moved tab')
@@ -1077,7 +1079,8 @@ const api = {
           appActions.newWebContentsAdded(toWindowId, frameOpts, tabValue)
         }
         // handle tab has made it to the new window
-        tab.once('did-attach', () => {
+        tabToAttach.once('did-attach', () => {
+          console.log('moved tab attached', getTabValue(attachedTabId))
           if (shouldDebugTabEvents) {
             console.log(`Tab attached to a new window, so setting the desired index`)
           }
@@ -1087,7 +1090,26 @@ const api = {
             api.setTabIndex(tabId, frameOpts.get('index'))
           }
         })
-      })
+      }
+      if (tabValue.get('discarded')) {
+        console.log('is discarded')
+        // we cannot move a discarded tab due to the tab getting disposed if we try
+        // therefore undiscard it by calling reload(), and then detach
+        tab.once('load-start', () => {
+          tab.once('did-detach', () => {
+            attachToNewWindow(tab)
+          })
+          tab.detach()
+        })
+        // tab.attach(tabValue.get('windowId'))
+        console.log('tab is discarded in window, so reloading before detach', tabValue.get('windowId'))
+        tab.reload()
+      } else {
+        tab.once('did-detach', () => {
+          attachToNewWindow(tab)
+        })
+        tab.detach()
+      }
     }
   },
 
