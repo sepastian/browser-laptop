@@ -20,6 +20,12 @@ Once `snapd` is installed, installing Brave looks like this:
     snap install brave
 ```
 
+Now run Brave with:
+
+```
+snap run brave
+```
+
 ## Debian (Jessie) and Ubuntu (Artful, Zesty, Yakkety, Xenial, and Trusty) AMD64:
 
 In the terminal to be used for the below commands, prime the `sudo` command (enter your password once).
